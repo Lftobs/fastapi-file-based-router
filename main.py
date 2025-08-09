@@ -15,10 +15,10 @@ Then visit http://localhost:8000 to see the demo in action.
 """
 
 import uvicorn
-from file_router import create_file_router
+from file_router import file_router
 
 # Create the app at module level for uvicorn reload
-router = create_file_router("routes")
+router = file_router("routes")
 app = router.get_app()
 
 

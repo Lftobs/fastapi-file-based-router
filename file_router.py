@@ -1,15 +1,84 @@
+"""
+Module: file_router.py
+This module implements a file-based router for FastAPI, allowing dynamic route registration based on file structure.
+It supports static, dynamic, typed, slug, and catch-all routes, along with custom tagging functionality.
+"""
+
+import inspect
+import logging
 import importlib.util
 from pathlib import Path
 from typing import Dict, List, Tuple, Any, Callable
 from fastapi import FastAPI
-import inspect
+
+from constants import FUNCTIONS_TO_SKIP
 
 
 class FileBasedRouter:
+    """
+    Main class for the file-based router.
+    This class handles:
+    - Scanning the routes directory
+    - Converting file paths to route patterns
+    - Loading route modules
+    - Extracting route handlers
+    - Registering routes with FastAPI
+    - Custom tag assignment for routes
+    - Providing access to registered routes and the FastAPI app instance
+    """
+
     def __init__(self, routes_dir: str = "routes"):
         self.routes_dir = Path(routes_dir)
         self.app = FastAPI()
         self._routes: List[Dict[str, Any]] = []
+        self._custom_tags: Dict[str, str] = {}
+
+    def _generate_tag_from_route(self, route_pattern: str, file_path: Path) -> str:
+        """
+        Generate a tag for the route based on the route pattern.
+
+        Priority:
+        1. Specific file path custom tag if set
+        2. Directory-level custom tag if set
+        3. First path segment (e.g., /users/1 -> "users")
+        4. "default" for root routes
+        """
+        file_path_str = str(file_path)
+
+        # Check for specific file path custom tag override
+        if file_path_str in self._custom_tags:
+            return self._custom_tags[file_path_str]
+
+        # Check for directory-level custom tag override
+        # Goes up the directory tree to find a matching custom tag
+        current_path = file_path.parent
+        while current_path != self.routes_dir.parent:
+            dir_path_str = str(current_path)
+            if dir_path_str in self._custom_tags:
+                return self._custom_tags[dir_path_str]
+            current_path = current_path.parent
+
+        # Extract first path segment
+        parts = [
+            part
+            for part in route_pattern.split("/")
+            if part and not part.startswith("{")
+        ]
+
+        if parts:
+            return parts[0]
+        else:
+            return "default"
+
+    def set_custom_tag(self, path: str, tag: str):
+        """
+        Set a custom tag for a specific route file or directory.
+
+        Examples:
+        - router.set_custom_tag("routes/users/[id].py", "user-details") # Specific file
+        - router.set_custom_tag("routes/users", "user-management")      # All files in directory
+        """
+        self._custom_tags[path] = tag
 
     def _parse_dynamic_segment(self, segment: str) -> Tuple[str, str, bool]:
         """
@@ -36,10 +105,9 @@ class FileBasedRouter:
         if ":" in inner:
             param_name, param_type = inner.split(":", 1)
             if param_type == "":
-                param_type = "str"  # [slug:] defaults to string
+                param_type = "str"
             return param_name, param_type, False
 
-        # Simple parameter [id]
         return inner, "str", False
 
     def _convert_file_path_to_route(
@@ -107,16 +175,30 @@ class FileBasedRouter:
         """Extract HTTP method handlers from a route module."""
         handlers = {}
 
-        # Common HTTP methods
         methods = ["GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS"]
+        method_names = [method.lower() for method in methods]
 
         for method in methods:
-            # Look for handler function (get, post, put, etc.)
             handler_name = method.lower()
             if hasattr(module, handler_name):
                 handler = getattr(module, handler_name)
                 if callable(handler):
                     handlers[method] = handler
+
+        # Check for unrecognized function names and log a warning
+        for name in dir(module):
+            if name.startswith("_"):
+                continue
+
+            attr = getattr(module, name)
+            if callable(attr) and inspect.isfunction(attr) and name not in method_names:
+                if name not in FUNCTIONS_TO_SKIP:
+                    logger = logging.getLogger("uvicorn.error")
+                    logger.warning(
+                        "Function '%s' in %s is not a recognized HTTP method handler",
+                        name,
+                        module.__name__,
+                    )
 
         return handlers
 
@@ -125,32 +207,27 @@ class FileBasedRouter:
         sig = inspect.signature(handler)
 
         if not params:
-            # No path parameters - create simple wrapper that preserves signature
+            # create simple wrapper that preserves signature if not path parameters
             # This allows FastAPI to handle request bodies, query params, headers, etc.
             if inspect.iscoroutinefunction(handler):
 
-                async def wrapper(*args, **kwargs):
+                async def simple_wrapper(*args, **kwargs):
                     return await handler(*args, **kwargs)
             else:
 
-                def wrapper(*args, **kwargs):
+                def simple_wrapper(*args, **kwargs):
                     return handler(*args, **kwargs)
 
             # Preserve the original signature for FastAPI dependency injection
-            wrapper.__signature__ = sig
-            return wrapper
+            simple_wrapper.__signature__ = sig
+            return simple_wrapper
 
-        # For routes with path parameters, we need to ensure the signature is correct
-        # but still let FastAPI handle other parameter types (Body, Query, Header, etc.)
-
-        # Get all parameter names and their information from the original handler
         original_params = list(sig.parameters.values())
         path_param_names = set(params.keys())
 
         # Build new signature preserving non-path parameters as-is
         new_params = []
 
-        # First, add path parameters with correct types
         for param_name, param_info in params.items():
             if param_info["type"] == "int":
                 param_type = int
@@ -165,47 +242,41 @@ class FileBasedRouter:
                 )
             )
 
-        # Then, add all other parameters from the original handler (request bodies, etc.)
         for param in original_params:
             if param.name not in path_param_names:
                 new_params.append(param)
 
-        # Create wrapper function that preserves FastAPI's dependency injection
+        # wrapper function to preserves FastAPI's dependency injection
         if inspect.iscoroutinefunction(handler):
 
-            async def wrapper(*args, **kwargs):
+            async def param_wrapper(*args, **kwargs):
                 return await handler(*args, **kwargs)
         else:
-
-            def wrapper(*args, **kwargs):
+            def param_wrapper(*args, **kwargs):
                 return handler(*args, **kwargs)
 
         # Set the correct signature for FastAPI
         new_sig = inspect.Signature(new_params)
-        wrapper.__signature__ = new_sig
+        param_wrapper.__signature__ = new_sig
 
-        return wrapper
+        return param_wrapper
 
     def scan_routes(self):
         """Scan the routes directory and register all route files."""
         if not self.routes_dir.exists():
             raise FileNotFoundError(f"Routes directory '{self.routes_dir}' not found")
 
-        # Find all Python files in routes directory
         for file_path in self.routes_dir.rglob("*.py"):
             if file_path.name.startswith("__"):
                 continue
 
             try:
-                # Convert file path to route pattern
                 route_pattern, params = self._convert_file_path_to_route(file_path)
 
-                # Load the module
                 module = self._load_route_module(file_path)
                 if module is None:
                     continue
 
-                # Extract handlers
                 handlers = self._extract_route_handlers(module, route_pattern, params)
 
                 if not handlers:
@@ -215,12 +286,14 @@ class FileBasedRouter:
                 for method, handler in handlers.items():
                     wrapped_handler = self._create_route_wrapper(handler, params)
 
-                    # Add route to FastAPI app
+                    tag = self._generate_tag_from_route(route_pattern, file_path)
+
                     self.app.add_api_route(
                         route_pattern,
                         wrapped_handler,
                         methods=[method],
                         name=f"{method.lower()}_{file_path.stem}",
+                        tags=[tag],
                     )
 
                 # Store route info
@@ -230,6 +303,7 @@ class FileBasedRouter:
                         "file_path": str(file_path),
                         "params": params,
                         "methods": list(handlers.keys()),
+                        "tag": tag,
                     }
                 )
 
@@ -246,7 +320,7 @@ class FileBasedRouter:
         return self.app
 
 
-def create_file_router(routes_dir: str = "routes") -> FileBasedRouter:
+def file_router(routes_dir: str = "routes") -> FileBasedRouter:
     """Create and configure a file-based router."""
     router = FileBasedRouter(routes_dir)
     router.scan_routes()

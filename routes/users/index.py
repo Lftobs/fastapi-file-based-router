@@ -20,7 +20,7 @@ users_db = [
 ]
 
 
-def get():
+def getty():
     """Get all users."""
     return {"users": users_db}
 

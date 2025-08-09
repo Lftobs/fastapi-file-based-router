@@ -2,7 +2,7 @@
 Test script to verify the curl error is fixed.
 """
 
-from file_router import create_file_router
+from file_router import file_router
 from fastapi.testclient import TestClient
 
 
@@ -10,7 +10,7 @@ def test_curl_error_fix():
     print("🔧 Testing curl error fix...")
 
     # Create router
-    router = create_file_router("routes")
+    router = file_router("routes")
     client = TestClient(router.get_app())
 
     test_cases = [

@@ -2,7 +2,7 @@
 Demo script showing how to handle request bodies in the file-based router.
 """
 
-from file_router import create_file_router
+from file_router import file_router
 from fastapi.testclient import TestClient
 import json
 
@@ -12,7 +12,7 @@ def main():
     print("=" * 50)
 
     # Create the router
-    router = create_file_router("routes")
+    router = file_router("routes")
     client = TestClient(router.get_app())
 
     print("\n1. 📤 JSON Request Body (POST /users)")

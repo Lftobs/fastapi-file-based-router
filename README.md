@@ -98,10 +98,10 @@ def get(path: str):
 ## Usage in Your Project
 
 ```python
-from file_router import create_file_router
+from file_router import file_router
 
 # Create router
-router = create_file_router("routes")
+router = file_router("routes")
 app = router.get_app()
 
 # Or use the class directly

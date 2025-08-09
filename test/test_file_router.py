@@ -3,7 +3,7 @@ import tempfile
 import shutil
 from pathlib import Path
 from fastapi.testclient import TestClient
-from file_router import FileBasedRouter, create_file_router
+from file_router import FileBasedRouter, file_router
 
 
 class TestFileBasedRouter:
@@ -364,7 +364,7 @@ some_variable = "test"
             for r in routes
         )
 
-    def test_create_file_router_function(self):
+    def test_file_router_function(self):
         """Test the convenience function for creating routers."""
         self.create_route_file(
             "test.py",
@@ -374,7 +374,7 @@ def get():
 """,
         )
 
-        router = create_file_router(str(self.routes_dir))
+        router = file_router(str(self.routes_dir))
         client = TestClient(router.get_app())
 
         response = client.get("/test")
