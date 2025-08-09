@@ -2,7 +2,7 @@
 
 A powerful file-based routing system for FastAPI that automatically maps file structures to API routes with support for dynamic parameters.
 
-> [!INFO]
+> [!WARNING]
 > You can use this to fuck with your personal or a friends repo but do not push to prod :)  
 
 ## Features
