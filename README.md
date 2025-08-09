@@ -22,7 +22,7 @@ A powerful file-based routing system for FastAPI that automatically maps file st
 
 2. **Run the demo server:**
    ```bash
-   python server.py
+   python main.py
    ```
 
 3. **Visit the API:**
@@ -50,6 +50,10 @@ routes/
     └── v1/
         └── health.py          # GET /api/v1/health
 ```
+
+> [!WARNING]
+> The directory used for the file based routing (in the example above uses the eoutes dir) should strictly only contain the method call for the endpoint.
+> Example below:
 
 ## Route Handler Examples
 
